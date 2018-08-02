@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <stdlib.h>
-#include "malloc.h"	
+#include "malloc.h"
 
 
 #define MEM_BLOCK_SIZE			 ((uint32_t)64)
@@ -43,8 +43,6 @@ void* refill(uint32_t n) ;
 
 void memory_init(void)
 {
-	memset(s_MemPool,0,MEM_MAX_SIZE);
-	memset(s_MemMaps,0,MEM_ALLOC_TABLE_SIZE*4);
     mem_busy = false;
     start_free = 0;
     end_free = 0;
@@ -55,10 +53,10 @@ static void *mymalloc (uint32_t size)
 {
     int32_t  offset=0;
     uint32_t nmemb;
-	uint32_t cmemb=0;
+    uint32_t cmemb=0;
     if(size == 0)
-	{
-		return NULL;
+    {
+        return NULL;
     }
     nmemb = size;
     nmemb >>=6; //get block
@@ -68,11 +66,11 @@ static void *mymalloc (uint32_t size)
     }
     for(offset = MEM_ALLOC_TABLE_SIZE-1;offset>= 0;offset--)
     {
-		if(s_MemMaps[offset] == 0)
+        if(s_MemMaps[offset] == 0)
         {
             cmemb ++;
         }
-		else
+        else
         {
             cmemb = 0;
         }
@@ -89,16 +87,16 @@ static void *mymalloc (uint32_t size)
 
 static void  myfree(void *pointer)
 {
-	uint32_t offset;
-	uint32_t block_num;
-	if(pointer == NULL)
-	{
-		return;
-	}
-	offset=(uint32_t)((char*)pointer - &s_MemPool[0]);
+    uint32_t offset;
+    uint32_t block_num;
+    if(pointer == NULL)
+    {
+        return;
+    }
+    offset=(uint32_t)((char*)pointer - &s_MemPool[0]);
     if(offset > MEM_MAX_SIZE)
     {
-		return;
+        return;
     }
     offset = FREE_OFFSET(offset);
     block_num  = s_MemMaps[offset];
@@ -106,12 +104,12 @@ static void  myfree(void *pointer)
     {
         s_MemMaps[offset+i]=0;
     }
-	pointer = NULL;
+    pointer = NULL;
 }
 
 
 
- void * allocate(uint32_t bytes)
+void * allocate(uint32_t bytes)
 {
     obj_t* volatile *my_free_list;
     obj_t *  result;
@@ -129,35 +127,35 @@ static void  myfree(void *pointer)
             bytes = ROUND_UP(bytes);
             int nobjs = 20;
             char * chunk = chunk_alloc(bytes, &nobjs);//从内存池里取出nobjs个大小为n的数据块,返回值nobjs为真实申请到的数据块个数，注意这里nobjs个大小为n的数据块所在的空间是连续的
-            if(chunk == NULL)
+            if(chunk != NULL)
             {
-                return NULL;
-            }
-            obj_t * current_obj, * next_obj;
-            if (1 == nobjs)
-            {
-                return(chunk);
-            }
-            my_free_list = &free_list[FREELIST_INDEX(bytes)];
-            result = (obj_t *)chunk;
-            *my_free_list = next_obj = (obj_t *)(chunk + bytes);
-            for (count = 1; ; count++)
-            {
-                current_obj = next_obj;
-                next_obj = (obj_t *)((char *)next_obj + bytes);
-                if (nobjs - 1 == count)
+                obj_t *current_obj, *next_obj;
+                if(nobjs > 1)
                 {
-                    current_obj -> free_list_link = 0;
-                    break;
+                    my_free_list = &free_list[FREELIST_INDEX(bytes)];
+                    result = (obj_t *) chunk;
+                    *my_free_list = next_obj = (obj_t *) (chunk + bytes);
+                    for( count = 1;; count++ )
+                    {
+                        current_obj = next_obj;
+                        next_obj = (obj_t *) ((char *) next_obj + bytes);
+                        if(nobjs - 1 == count)
+                        {
+                            current_obj->free_list_link = 0;
+                            break;
+                        }
+                        else
+                        {
+                            current_obj->free_list_link = next_obj;
+                        }
+                    }
                 }
                 else
                 {
-                    current_obj -> free_list_link = next_obj;
+                    result =  (obj_t *) chunk;
                 }
             }
-            return(result);
         }
-        mem_busy = false;
     }
     else
     {
@@ -168,7 +166,7 @@ static void  myfree(void *pointer)
 
 
 
- void deallocate(void *p, uint32_t n)
+void deallocate(void *p, uint32_t n)
 {
     obj_t   *q = (obj_t *)p;
     obj_t * volatile * my_free_list;
@@ -183,45 +181,9 @@ static void  myfree(void *pointer)
     else{
         free(p);
     }
-   mem_busy = false;
+    mem_busy = false;
 }
 
-
-void* refill(uint32_t n)
-{
-    int nobjs = 20;
-    char * chunk = chunk_alloc(n, &nobjs);//从内存池里取出nobjs个大小为n的数据块,返回值nobjs为真实申请到的数据块个数，注意这里nobjs个大小为n的数据块所在的空间是连续的
-    if(chunk == NULL)
-    {
-        return NULL;
-    }
-    obj_t *  volatile * my_free_list;
-    obj_t * result;
-    obj_t * current_obj, * next_obj;
-    int i;
-    if (1 == nobjs)
-    {
-        return(chunk);
-    }
-    my_free_list = &free_list[FREELIST_INDEX(n)];
-    result = (obj_t *)chunk;
-    *my_free_list = next_obj = (obj_t *)(chunk + n);
-    for (i = 1; ; i++)
-    {
-        current_obj = next_obj;
-        next_obj = (obj_t *)((char *)next_obj + n);
-        if (nobjs - 1 == i)
-        {
-            current_obj -> free_list_link = 0;
-            break;
-        }
-        else
-        {
-            current_obj -> free_list_link = next_obj;
-        }
-    }
-    return(result);
-}
 
 
 static char *chunk_alloc(uint32_t size, int *nobjs)
@@ -284,35 +246,41 @@ static char *chunk_alloc(uint32_t size, int *nobjs)
 }
 
 
-#define malloc_size     (rand()%100+10)
+#define malloc_size     (rand()%150+10)
 #define usr_malloc(x)   allocate(x)
 #define usr_free(x,y)   deallocate(x,y)
 
+char *teststr = "1 If you run into any issues or have suggestions for us, please file issues and suggestions on GitHub\r\n"
+                "2 If you run into any issues or have suggestions for us, please file issues and suggestions on GitHub\r\n"
+                "3 If you run into any issues or have suggestions for us, please file issues and suggestions on GitHub\r\n"
+                "4 If you run into any issues or have suggestions for us, please file issues and suggestions on GitHub\r\n"
+                "5 If you run into any issues or have suggestions for us, please file issues and suggestions on GitHub\r\n";
 
 int main()
 {
-	memory_init();
-	uint32_t count;
-	clock_t start;
-	clock_t end;
-	char *buf;
-	int size ;
-	while(1)
-	{
-		start = clock();
-		for(count = 0;count < 10000000;count++)
-		{
+    memory_init();
+    uint32_t count;
+    clock_t start;
+    clock_t end;
+    char *buf;
+    int size ;
+    while(1)
+    {
+        start = clock();
+        for(count = 0;count < 10000000;count++)
+        {
             size = malloc_size;
-			buf = usr_malloc(size);
-			if(buf == NULL)
-			{
-			    printf("malloc count = %ld\r\n",count);
+            buf = usr_malloc(size);
+            if(buf == NULL)
+            {
+                printf("malloc count = %ld\r\n",count);
                 return  0;
-			}
-            memset(buf,'A',size);
+            }
+            memcpy(buf,teststr,size);
+            printf("%s\r\n",buf);
             usr_free(buf,size);
-		}
-		end = clock();
-		printf("size = %d,total time = %ld\r\n",size,(end-start));
-	}
+        }
+        end = clock();
+        printf("size = %d,total time = %ld\r\n",size,(end-start));
+    }
 }
