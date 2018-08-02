@@ -115,11 +115,9 @@ static void  myfree(void *pointer)
 {
     obj_t* volatile *my_free_list;
     obj_t *  result;
-    int    count;
+    int      count;
     if (bytes <  __MAX_BYTES)
     {
-        while( mem_busy );
-        mem_busy = true;
         my_free_list = &free_list[FREELIST_INDEX(bytes)];
         result = *my_free_list;
         if(result != NULL)
@@ -128,23 +126,18 @@ static void  myfree(void *pointer)
         }
         else
         {
-            int nobjs = 10;
-            char *chunk = mymalloc(ROUND_UP(bytes)*10);
-            if(chunk == NULL)  //has no memory anymore
+            bytes = ROUND_UP(bytes);
+            int nobjs = 20;
+            char * chunk = chunk_alloc(bytes, &nobjs);//从内存池里取出nobjs个大小为n的数据块,返回值nobjs为真实申请到的数据块个数，注意这里nobjs个大小为n的数据块所在的空间是连续的
+            if(chunk == NULL)
             {
-                for (count = bytes; count <= __MAX_BYTES; count += __ALIGN)
-                {
-                    my_free_list = &free_list[FREELIST_INDEX(count)];
-                    result = *my_free_list;
-                    if (result != NULL)
-                    {
-                        *my_free_list = result -> free_list_link;
-                    }
-                }
-                return result;
+                return NULL;
             }
-            heap_size += ROUND_UP(bytes)*10;
             obj_t * current_obj, * next_obj;
+            if (1 == nobjs)
+            {
+                return(chunk);
+            }
             my_free_list = &free_list[FREELIST_INDEX(bytes)];
             result = (obj_t *)chunk;
             *my_free_list = next_obj = (obj_t *)(chunk + bytes);
@@ -162,12 +155,13 @@ static void  myfree(void *pointer)
                     current_obj -> free_list_link = next_obj;
                 }
             }
+            return(result);
         }
         mem_busy = false;
     }
     else
     {
-        result =  mymalloc(bytes);
+        result =  malloc(bytes);
     }
     return result->client_data;
 }
@@ -187,7 +181,7 @@ static void  myfree(void *pointer)
         *my_free_list = q;
     }
     else{
-        myfree(p);
+        free(p);
     }
    mem_busy = false;
 }
@@ -195,7 +189,7 @@ static void  myfree(void *pointer)
 
 void* refill(uint32_t n)
 {
-    int nobjs = 10;
+    int nobjs = 20;
     char * chunk = chunk_alloc(n, &nobjs);//从内存池里取出nobjs个大小为n的数据块,返回值nobjs为真实申请到的数据块个数，注意这里nobjs个大小为n的数据块所在的空间是连续的
     if(chunk == NULL)
     {
@@ -233,54 +227,59 @@ void* refill(uint32_t n)
 static char *chunk_alloc(uint32_t size, int *nobjs)
 {
     char * result;
-    uint32_t total_bytes = size * *nobjs;
-    uint32_t bytes_left = (uint32_t )(end_free - start_free);
-    if (bytes_left >= total_bytes)
+    uint32_t total_bytes;
+    uint32_t bytes_left;
+    while(1)
     {
-        result = start_free;
-        start_free += total_bytes;
-        return(result);
-    }
-    else if (bytes_left >= size)
-    {
-        *nobjs = (int)(bytes_left / size);
         total_bytes = size * *nobjs;
-        result = start_free;
-        start_free += total_bytes;
-        return(result);
-    }
-    else
-    {
-        size_t bytes_to_get = 2 * total_bytes + ROUND_UP(heap_size >> 4);
-        if (bytes_left > 0)
+        bytes_left= (uint32_t )(end_free - start_free);
+        if(bytes_left >= total_bytes)
         {
-             obj_t *  volatile * my_free_list = &free_list [FREELIST_INDEX(bytes_left)];
-            ((obj_t *)start_free) -> free_list_link = *my_free_list;
-            *my_free_list = (obj_t *)start_free;
+            result = start_free;
+            start_free += total_bytes;
+            return (result);
         }
-        start_free = (char *)mymalloc(bytes_to_get);
-        if (NULL == start_free)
+        else if(bytes_left >= size)
         {
-            int i;
-            obj_t * volatile * my_free_list, *p;
-            for (i = size; i <= __MAX_BYTES; i += __ALIGN)
+            *nobjs = (int) (bytes_left / size);
+            total_bytes = size * *nobjs;
+            result = start_free;
+            start_free += total_bytes;
+            return (result);
+        }
+        else
+        {
+            uint32_t bytes_to_get = 2 * total_bytes + ROUND_UP(heap_size >> 4);
+            if(bytes_left > 0)
             {
-                my_free_list = &free_list[FREELIST_INDEX(i)];
-                p = *my_free_list;
-                if (0 != p)
-                {
-                    *my_free_list = p -> free_list_link;
-                    start_free = (char *)p;
-                    end_free = start_free + i;
-                    return(chunk_alloc(size, nobjs));//递归调用自己，为了修正nobjs
-                }
+                obj_t *volatile *my_free_list = &free_list[FREELIST_INDEX(bytes_left)];
+                ((obj_t *) start_free)->free_list_link = *my_free_list;
+                *my_free_list = (obj_t *) start_free;
             }
-            end_free = 0;
-            return NULL;//如果连这个大的数据块都找不出来则调用第一级配置器
+            start_free = (char *) malloc(bytes_to_get);
+            if(NULL == start_free)
+            {
+                int i;
+                obj_t *volatile *my_free_list, *p;
+                for( i = size; i <= __MAX_BYTES; i += __ALIGN )
+                {
+                    my_free_list = &free_list[FREELIST_INDEX(i)];
+                    p = *my_free_list;
+                    if(0 != p)
+                    {
+                        *my_free_list = p->free_list_link;
+                        start_free = (char *) p;
+                        end_free = start_free + i;
+                        continue;//递归调用自己，为了修正nobjs
+                    }
+                }
+                end_free = 0;
+                return NULL;//如果连这个大的数据块都找不出来则调用第一级配置器
+            }
+            heap_size += bytes_to_get;//内存池大小增加
+            end_free = start_free + bytes_to_get;//修改内存池可用空间的结束位置
+            continue;
         }
-        heap_size += bytes_to_get;//内存池大小增加
-        end_free = start_free + bytes_to_get;//修改内存池可用空间的结束位置
-        return(chunk_alloc(size, nobjs));//递归调用自己，为了修正nobjs
     }
 }
 
